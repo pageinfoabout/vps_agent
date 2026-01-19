@@ -19,4 +19,9 @@ webhook_receiver = lk_webhook.WebhookReceiver(token_verifier)
 async def livekit_webhook(request: Request):
     body = await request.body()
     auth_header = request.headers.get("Authorization")
-    return {"body": body, "event": auth_header}
+
+    print({"body": body, "auth_header": auth_header})
+
+    return {"status": "success"}
+
+
