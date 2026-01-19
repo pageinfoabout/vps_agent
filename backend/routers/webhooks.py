@@ -21,8 +21,9 @@ async def livekit_webhook(request: Request):
     body = await request.body()
     auth_header = request.headers.get("Authorization")
 
-   
-                
-    
+    print({"body": body, "auth_header": auth_header})
+
+    return {"status": "success"}
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

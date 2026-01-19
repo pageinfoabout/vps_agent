@@ -1,6 +1,9 @@
 from pathlib import Path
 
 from livekit import api
+import livekit
+from livekit.api import DeleteRoomRequest
+
 
 import logging
 import pytz
@@ -188,12 +191,19 @@ server = AgentServer()
 @server.rtc_session(agent_name="assistant")
 async def my_agent(ctx: JobContext):
 
-    
+
+
+
+    lkapi = api.LiveKitAPI(
+                url=LIVEKIT_URL,
+                api_key=LIVEKIT_API_KEY,
+                api_secret=LIVEKIT_API_SECRET,
+            )
+
     room = ctx.room 
     room_name = room.name
    
     print(f"🔔 Room name: {room_name}")
-   
     
 
 
@@ -239,10 +249,22 @@ async def my_agent(ctx: JobContext):
            
         ),
     )
-    await session.say(
-           "Клиника «Алиф Дэнт». Здравствуйте, как я могу вам помочь?",
-            allow_interruptions=False,
-        )
+    participant = await ctx.wait_for_participant()
+    participant.attributes['sip.phoneNumber']
+    print(f"🔔 Participant joined: { participant.attributes} ({participant.kind})")
+
+    if not participant:
+        print("No participant joined.")
+        await lkapi.room.delete_room(DeleteRoomRequest(
+        room="myroom",
+        ))
+    else:
+
+        await session.say(
+            "Клиника «Алиф Дэнт». Здравствуйте, как я могу вам помочь?",
+                allow_interruptions=False,
+            )
+        
 
             # Внутри твоего agent.py → AgentSession
     
