@@ -12,12 +12,22 @@ LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
 token_verifier = lk_webhook.TokenVerifier(api_key=LIVEKIT_API_KEY, api_secret=LIVEKIT_API_SECRET)
 webhook_receiver = lk_webhook.WebhookReceiver(token_verifier)
 
-@router.post("/webhooks/caller")  # ← ТОЧНО такой путь!
+@router.post("/webhooks/caller")
 async def livekit_webhook(request: Request):
     print("🔥 WEBHOOK HIT!")
+    
+    # LiveKit webhook ТРЕБУЕТ 2 параметра!
+    body = await request.body()
+    auth_header = request.headers.get("Authorization")
+    
+    print(f"📦 Body size: {len(body)} bytes")
+    print(f"🔑 Auth header: {auth_header[:50]}...")
+    
     try:
-        event = await webhook_receiver.receive(request)
+        # ✅ ПРАВИЛЬНЫЙ вызов с auth_token!
+        event = webhook_receiver.receive(body, auth_header)
         room_name = event.room.name if event.room else None
+        
         print(f"📡 EVENT: {event.event} | Room: {room_name}")
         return {"status": "ok", "event": event.event, "room": room_name}
     except Exception as e:
