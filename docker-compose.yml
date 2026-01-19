@@ -23,12 +23,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G      # ← 4GB для Silero + LiveKit!
-          cpus: '2.0'     # 2 CPU
+          memory: 16G     # ← 4GB для Silero + LiveKit!
+          cpus: '4.0'     # 2 CPU
         reservations:
-          memory: 2G
+          memory: 4G
     environment:
-      - LIVEKIT_AGENT_MAX_MEMORY_MB=4096  # убираеdcoт warning
+      - LIVEKIT_AGENT_MAX_MEMORY_MB=16384  # убираеdcoт warning
       - TORCH_BACKEND=none                # убирает NNPACK spam
     volumes:
       - ./backend/logs:/agent/logs
