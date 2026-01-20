@@ -219,7 +219,7 @@ async def my_agent(ctx: JobContext):
             api_key=DEEPGRAM_API_KEY,
         ),
         llm=openai.LLM.with_deepseek(
-            model="deepseek-reasoner",
+            model="deepseek-chat",
             base_url="https://api.deepseek.com/v1",
             api_key=DEEPSEEK_API_KEY,
             
