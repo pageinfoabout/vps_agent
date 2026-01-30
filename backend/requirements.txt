@@ -7,16 +7,25 @@ pytz
 
 pytz
 supabase
-onnxruntime
+
 livekit
 
 openai
 livekit-api
 
+
+livekit-api
+livekit
+
 livekit-plugins-openai
-livekit-plugins-deepgram 
-livekit-plugins-noise-cancellation
+livekit-plugins-deepgram
 livekit-plugins-silero
+livekit-plugins-noise-cancellation
+
+
+python-dotenv
+pytz
+
 omegaconf
 torch
 torchaudio
