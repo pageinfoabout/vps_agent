@@ -27,4 +27,4 @@ ENV PYTHONPATH=/backend
 ENV PATH="/root/.local/bin:$PATH"
 
 
-CMD ["python","-m", "agent", "dev"]
+CMD ["python","-m", "agent", "console"]
