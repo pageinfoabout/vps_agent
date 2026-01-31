@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from livekit import api
+from livekit import api, rtc
+from livekit.agents import get_job_context
 from livekit.api import DeleteRoomRequest
 from livekit.agents.beta.workflows.dtmf_inputs import GetDtmfTask
 import logging
@@ -24,7 +25,7 @@ from livekit.agents import (
     cli,
     room_io,
 )
-from livekit.plugins import openai, silero, noise_cancellation
+from livekit.plugins import openai, silero
 
 from datetime import datetime
 from tools import  get_times_by_date, create_booking, get_services, get_id_by_phone, get_cupon, delete_booking
@@ -76,18 +77,13 @@ class Main_Agent(Agent):
         service_data: JSON с данными услуги {"id": "1", "name": "Лечение кариеса", "price": 5000}
         
         **🚨 КОГДА УСЛУГА ОПРЕДЕЛЕНА через get_services():**
-
         1. Предложи пациенту услугу из списка
         2. Получи подтверждение  
         3. **ВЫЗОВИ transfer_to_booking** с JSON:
         {{"id": "1", "name": "Лечение кариеса", "price": 5000}}
-
         text
-
         ** НЕ записывай сама! Только передавай агенту записи! **
-    
         """
-    
         userdata = ctx.userdata
         # парсим и сохраняем услугу в userdata
         phone = userdata.phone
@@ -130,8 +126,27 @@ class Main_Agent(Agent):
             
         except Exception as e:
             logger.error(f"Failed to transfer call: {e}", exc_info=True)
-            await self.session.generate_reply(user_input="Извините, не удалось перевести звонок. Чем ещё могу помочь?")
+            await self.session.generate_reply(user_input="Извините, cкорее всего все менеджеры заняты. Чем ещё могу помочь?")
 
+
+    @function_tool
+    async def end_call(self, ctx: RunContext[UserData]) -> None:
+        """
+        Вызывается если пациент сказал до свидания или хочет завершить звонок.
+        
+        """
+        lkapi = api.LiveKitAPI(
+                url=LIVEKIT_URL,
+                api_key=LIVEKIT_API_KEY,
+                api_secret=LIVEKIT_API_SECRET,
+            )
+        await self.session.generate_reply(user_input="До свидания!")
+
+        await lkapi.room.delete_room(DeleteRoomRequest(
+        room=ctx.userdata.room,
+        ))
+        print(f"🔔Звонок в комнате {ctx.userdata.room} завершен.")
+        
     def __init__(self) -> None:
        
         super().__init__(
@@ -174,10 +189,13 @@ Cегодня {datetime.now(pytz.timezone('Europe/Moscow')).strftime("%d %B %Y")
 - пациент может ошибаться в названии услуги или врача, всегда помогай ему 
 — на основании ответов определи подходящую услугу и специалиста
 
-Примеры наводящих вопросов
-
+Ты должна определить, нужна ли пациенту консультация, осмотр или лечение
+- если пациент не может точно сформулировать проблему, задавай наводящие вопросы
+- уточняй симптомы
 — Что вас беспокоит сейчас
-— Ты должна определить, нужна ли пациенту консультация, осмотр или лечение
+
+Ты можешь задать максимум 2-3 вопроса, не больше !!!!
+
 
 Твоя цель — чтобы пациент почувствовал заботу, понял, что его слышат, и получил правильное направление к нужному специалисту клиники.
 
@@ -185,16 +203,72 @@ Cегодня {datetime.now(pytz.timezone('Europe/Moscow')).strftime("%d %B %Y")
 ЗАПОМНИ ВАЖНО !!! 
 
 После того, как ты определишь услугу, вызови функцию transfer_to_booking с JSON-данными услуги
+
+
+Если пациент хочет отменить запись, используй delete_booking.
 """
 ,
-tools=[get_services],
+tools=[get_services, delete_booking],
 vad=silero.VAD.load(),
         llm=openai.realtime.RealtimeModel(
             voice="sage"
         ),
     )
 class Booking_Agent(Agent):
-     def __init__(self, service_id: str, service_name: str, service_price: int, phone: int, *, chat_ctx: Optional[ChatContext] = None) -> None:
+
+    @function_tool
+    async def end_call(self, ctx: RunContext[UserData]) -> None:
+        """
+        Вызывается если пациент сказал до свидания или хочет завершить звонок.
+        
+        """
+        lkapi = api.LiveKitAPI(
+                url=LIVEKIT_URL,
+                api_key=LIVEKIT_API_KEY,
+                api_secret=LIVEKIT_API_SECRET,
+            )
+        await self.session.generate_reply(user_input="До свидания!")
+
+        await lkapi.room.delete_room(DeleteRoomRequest(
+        room=ctx.userdata.room,
+        ))
+        print(f"🔔Звонок в комнате {ctx.userdata.room} завершен.")
+     
+    @function_tool
+    async def transfer_call(self, ctx: RunContext[UserData]) -> None:
+        """
+        Вызывается для перевода звонка на менеджера.
+        """
+        userdata = ctx.userdata
+        # парсим и сохраняем услугу в userdata
+        participant_identity = userdata.participant_identity
+        transfer_to = "sip:79150628917@sip.your-provider.com"
+        room = userdata.room
+        print(f"Transferring call for participant {participant_identity} to {transfer_to}")
+
+        try:
+           
+            livekit_url = LIVEKIT_URL
+            api_key = LIVEKIT_API_KEY
+            api_secret = LIVEKIT_API_SECRET
+            userdata.livekit_api = api.LiveKitAPI(
+                url=livekit_url,
+                api_key=api_key,
+                api_secret=api_secret
+            )
+            transfer_request = proto_sip.TransferSIPParticipantRequest(
+            participant_identity=participant_identity,
+            room_name=room,
+            transfer_to=transfer_to,  # ← строка "79150628917"
+            play_dialtone=True
+        )
+            await userdata.livekit_api.sip.transfer_sip_participant(transfer_request) 
+            
+        except Exception as e:
+            logger.error(f"Failed to transfer call: {e}", exc_info=True)
+            await self.session.generate_reply(user_input="Извините, cкорее всего все менеджеры заняты. Чем ещё могу помочь?")
+
+    def __init__(self, service_id: str, service_name: str, service_price: int, phone: int, *, chat_ctx: Optional[ChatContext] = None) -> None:
         super().__init__(
            
 
@@ -239,13 +313,18 @@ Cегодня {datetime.now(pytz.timezone('Europe/Moscow')).strftime("%d %B %Y")
 
 Если эти правила нарушены, диалог считается неверным.
 
+
+
+
 ────────────────
 
-
+Если вдруг пациент передумал и хочет поменять услугу, используй get_services.
+────────────────
+Если вдруг пациент хочет отменить запись, используй delete_booking.
 
 Когда запись будет успешно создана, сообщи пациенту дату и время его приема, и поблагодари его за обращение в клинику Алиф Дэнт.
 """,
-            tools=[get_times_by_date, create_booking, get_id_by_phone, get_cupon, delete_booking],
+            tools=[get_times_by_date, create_booking, get_id_by_phone, get_cupon, delete_booking, get_services],
             vad=silero.VAD.load(),
             llm=openai.realtime.RealtimeModel(
             voice="coral"
