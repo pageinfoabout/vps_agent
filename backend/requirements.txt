@@ -7,22 +7,21 @@ pytz
 
 pytz
 supabase
-
+onnxruntime
 livekit
 
 openai
 livekit-api
 
-
-livekit-api
-livekit
-
 livekit-plugins-openai
-livekit-plugins-deepgram
-livekit-plugins-silero
+livekit-plugins-deepgram 
 livekit-plugins-noise-cancellation
+livekit-plugins-silero
+omegaconf
+torch
+torchaudio
+numpy
+scipy
 
-
-python-dotenv
-pytz
-
+asyncio 
+phonenumbers

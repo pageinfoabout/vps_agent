@@ -1,17 +1,14 @@
 
 
 import os
+import aiohttp
+import asyncio
 
 from dotenv import load_dotenv
 from livekit.agents import llm
 
-
-from config.db import supabase
-from typing import Optional
 import logging
 import json
-
-
 
 
 logger = logging.getLogger("tools")
@@ -23,34 +20,172 @@ LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
 
 
+async def get_token() -> str:
+    url = "https://crmexchange.1denta.ru/api/v2/auth"
+    payload = {
+        "email": "YOUR_EMAIL",
+        "password": "YOUR_PASSWORD"
+    }
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload, headers=headers) as response:
+            raw = await response.text()
+            print("=== AUTH API RESPONSE ===")
+            print("Status:", response.status)
+            if response.status != 200:
+                raise Exception(f"Auth failed: {raw}")
+            data = await response.json()
+            return data["token"] 
+    
+
+
+
+
 @llm.function_tool
-async def get_times_by_date(date: str) -> str:
+async def delete_booking(visit_id) -> str:
     """
-    Возвращает список уже занятых записей к врачу для указанной даты.
-
-    В течение одного дня доступно 12 временных слотов:
-    с 09:00 до 20:00.
-
-
-    Функция используется для проверки занятости времени на выбранную дату.
-    Она показывает, на какое время записи к врачу в поликлинике уже забронирован и недоступны
-    для записи, а все остальные слоты считаются свободными и могут быть
-    забронированы пациентом.
-
-    :param date: По умлочанию всегда ставь 2026 год, но если пользователь хочет записаться на другой год, то ставь год который он хочет
-    :return: Строка или структура данных со списком забронированных записей
+    Возвращает список врачей с доступными слотами времени
+    за указанный период по выбранной услуге.
     """
+    headers = {
+        "Accept": "application/json",
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjU1MjksImFwaUtleSI6InRuTUU1OHVNbXVZQjBUS01FN3JDIiwib3JnSWQiOjEwNDg0LCJuYW1lIjoi0KPQvNCw0YDQsdC10LrQvtCyINCa0LDQvdCw0YLQsdC10Log0KPQvNCw0YDQsdC10LrQvtCy0LjRhyIsInBob25lIjoiKzcoOTk5KTg1MS02Ni05MiIsImVtYWlsIjoiYWxpZmRlbnRtb3Njb3dAZ21haWwuY29tIiwiaWF0IjoxNzcxMjQ1MzA3fQ.ftZ3FNzSEiOuS6Ex9I_kcpCsGmL_Z7ElGAp5P62fMFs"
+    }
 
-    response = supabase.table("bookings") \
-        .select("date, time") \
-        .eq("date", date) \
-        .execute()
-    print(f"Response. : {response}")
+    url = f"https://crmexchange.1denta.ru/api/v2/visit/{visit_id}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers,) as response:
+            raw = await response.text()
+            # 🔍 PRINT RAW RESPONSE (always)
+            print("=== get_date API RESPONSE ===")
+            print("Status:", response.status)
+            print("Body:", raw)
+            print("============================")
 
-    if not response.data:
-        return "На эту дату записей нет"
+            # ✅ 200 OK
+            if response.status == 200:
+                return raw
+
+            # ❌ errors: 404 / 422 / others
+            try:
+                error = json.loads(raw)
+            except json.JSONDecodeError:
+                error = {"code": "UNKNOWN_ERROR", "message": raw}
+
+            return json.dumps(
+                {
+                    "http_status": response.status,
+                    "code": error.get("code"),
+                    "message": error.get("message")
+                },
+                ensure_ascii=False
+            )
         
-    return json.dumps(response.data, ensure_ascii=False)
+
+
+
+@llm.function_tool
+async def get_date(from_date: str, to_date: str, doc_id: int) -> str:
+    """
+    Возвращает список доступных дат у конкретного врача
+    """
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjU1MjksImFwaUtleSI6InRuTUU1OHVNbXVZQjBUS01FN3JDIiwib3JnSWQiOjEwNDg0LCJuYW1lIjoi0KPQvNCw0YDQsdC10LrQvtCyINCa0LDQvdCw0YLQsdC10Log0KPQvNCw0YDQsdC10LrQvtCy0LjRhyIsInBob25lIjoiKzcoOTk5KTg1MS02Ni05MiIsImVtYWlsIjoiYWxpZmRlbnRtb3Njb3dAZ21haWwuY29tIiwiaWF0IjoxNzcxMjQ1MzA3fQ.ftZ3FNzSEiOuS6Ex9I_kcpCsGmL_Z7ElGAp5P62fMFs"
+    }
+
+    params = {
+        "serviceIds[]": "515",
+        "from": from_date,
+        "to": to_date
+    }
+
+    url = f"https://crmexchange.1denta.ru/api/v2/resource/{doc_id}/date"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=params) as response:
+
+            raw = await response.text()
+
+            # 🔍 PRINT RAW RESPONSE (always)
+            print("=== get_date API RESPONSE ===")
+            print("Status:", response.status)
+            print("Body:", raw)
+            print("============================")
+
+            # ✅ 200 OK
+            if response.status == 200:
+                return raw
+
+            # ❌ errors: 404 / 422 / others
+            try:
+                error = json.loads(raw)
+            except json.JSONDecodeError:
+                error = {"code": "UNKNOWN_ERROR", "message": raw}
+
+            return json.dumps(
+                {
+                    "http_status": response.status,
+                    "code": error.get("code"),
+                    "message": error.get("message")
+                },
+                ensure_ascii=False
+            )
+        
+
+@llm.function_tool
+async def get_time(date: str, doc_id: int) -> str:
+    """
+    Возвращает список врачей с доступными слотами времени
+    за указанный период по выбранной услуге.
+    """
+
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjU1MjksImFwaUtleSI6InRuTUU1OHVNbXVZQjBUS01FN3JDIiwib3JnSWQiOjEwNDg0LCJuYW1lIjoi0KPQvNCw0YDQsdC10LrQvtCyINCa0LDQvdCw0YLQsdC10Log0KPQvNCw0YDQsdC10LrQvtCy0LjRhyIsInBob25lIjoiKzcoOTk5KTg1MS02Ni05MiIsImVtYWlsIjoiYWxpZmRlbnRtb3Njb3dAZ21haWwuY29tIiwiaWF0IjoxNzcxMjQ1MzA3fQ.ftZ3FNzSEiOuS6Ex9I_kcpCsGmL_Z7ElGAp5P62fMFs"
+    }
+
+    params = {
+        "serviceIds[]": "515",
+        "date": date
+    }
+    url = f"https://crmexchange.1denta.ru/api/v2/resource/{doc_id}/time"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=params) as response:
+
+            raw = await response.text()
+
+            # 🔍 PRINT RAW RESPONSE (always)
+            print("=== get_date API RESPONSE ===")
+            print("Status:", response.status)
+            print("Body:", raw)
+            print("============================")
+
+            # ✅ 200 OK
+            if response.status == 200:
+                return raw
+
+            # ❌ errors: 404 / 422 / others
+            try:
+                error = json.loads(raw)
+            except json.JSONDecodeError:
+                error = {"code": "UNKNOWN_ERROR", "message": raw}
+
+            return json.dumps(
+                {
+                    "http_status": response.status,
+                    "code": error.get("code"),
+                    "message": error.get("message")
+                },
+                ensure_ascii=False
+            )
+    
 
 @llm.function_tool
 async def get_services() -> str:
@@ -59,192 +194,96 @@ async def get_services() -> str:
 
 
     :return: Список услуг в формате JSON
-    id = это название услуги по английскому языку (например: serv-orthodontic-maintenance)
-    name = это название услуги по русскому языку
+    id = номер услуги
+    title = это название услуги 
     price = это цена услуги
 
     :example:
     [
         {
-            "id": "serv-orthodontic-maintenance",
-            "name": "Услуги по обслуживанию ортодонтических аппаратов",
-            "price": 1100
-        },
+            "id": "130",
+            "title": "Наложение лечебной повязки при заболеваниях слизистой оболочки полости рта и пародонта в области одного зуба при обработке пародонтального кармана диодным лазером",
+            "description": null,
+            "category": "Профилактика заболеваний полости рта",
+            "durationSeconds": 0,
+            "price": {
+                "currencyCode": "RUB",
+                "range": [
+                    "450.00",
+                    "450.00"
+                ]
+            }
+        }
     ]
        """
-    response = supabase.table("services") \
-        .select("*") \
-        .execute()
-    print(f"Response: {response}")
-    if response.data:
-        return json.dumps(response.data, ensure_ascii=False)
-    else:
-        return json.dumps({"error": "Не удалось получить услуги или таблица пуста"}, ensure_ascii=False)
-
-
-@llm.function_tool
-async def get_id_by_phone(phone: str) -> str:
-    """
-
-    Возвращает ID пользователя по номеру телефона
-    убери все символы кроме цифр
-    и номер телефона должен быть в формате 
-    :param phone: Номер телефона пользователя
-    :return: ID пользователя ( если нет id возращаешь null)
-    :example:
-    """
-    
-    response = supabase.table("users") \
-        .select("id") \
-        .eq("number", phone) \
-        .execute()
-    print(f"Response: {response}")
-    if response.data:
-        return json.dumps(response.data, ensure_ascii=False)
-    else:
-        return json.dumps({"error": "у пользователя нет id "}, ensure_ascii=False)
-
-
-@llm.function_tool
-async def get_cupon(cupon_name: str) -> str:
-    
-    """
-    Возвращает информацию о купоне по его названию
-    :param cupon_name: Название купона
-    :return: Информация о купоне
-    :example:
-    "10% скидка"
-    """
-    response = supabase.table("cupons") \
-        .select("*") \
-        .eq("cupon_name", cupon_name) \
-        .execute()
-    print(f"Response: {response}")
-    if response.data:
-        return json.dumps(response.data, ensure_ascii=False)
-    else:
-        return json.dumps({"error": "Такого купона не существует" }, ensure_ascii=False)
-
-
-@llm.function_tool
-async def delete_booking(phone: str, date: str, time: str) -> str:
-    """
-    Удаляет запись по его ID
-    :param phone: phone
-    :param date: Дата приёма
-    :param time: Время приёма
-    :return: Сообщение об успешном удалении
-    
-    """
-    phone_with_plus = f"+{phone}" 
-    response = supabase.table("bookings").delete().eq("phone", phone_with_plus).eq("date", date).eq("time", time).execute()
-    print(f"Response: {response}")
-    if response.data:
-        return json.dumps(response.data, ensure_ascii=False)
-    else:
-        return json.dumps({"error": "Запись не найдена" }, ensure_ascii=False)
-
-
-@llm.function_tool
-async def create_booking(name: str, phone: str, date: str, time: str, service_id: str, service_name: str, service_price: int, cabinet_id: Optional[str] = None,
-    cupon_name: Optional[str] = None,
-    discount_percent: Optional[int] = None,) -> str:
-    
-    """
-
-        Ты вызываешь функцию создания записи только после того как пользователь подтвердил данные и сказал "да"
-        если пользователь сказал "нет", то НЕ вызывай функцию.
-
-        Перед вызовом функции ты ОБЯЗАН убедиться, что получены все обязательные данные.
-
-        ---
-
-        # Обязательные поля (без них функцию вызывать нельзя)
-
-        ФИО пациента
-        -----
-        телефон
-        -----
-        дата приёма
-        -----
-        время приёма
-        ----
-        услуга
-        ----
-        название купона
-       
-
-        ---
-
-        # Дополнительные поля
-
-        - cupon_name — название купона
-
-        Правила работы с купоном:
-        - если пациент называет купон → передай его строкой
-        - если пациент говорит, что купона нет или он не знает → передай `null`
-        - никогда не выдумывай купон
-
-        ---
-
-        # Формат услуги (services)
-
-        Каждая услуга передаётся в виде объекта:
-        {
-        "id": "service_id" (например: serv-orthodontic-maintenance),
-        "name": "service_name" (например: Услуги по обслуживанию ортодонтических аппаратов),
-        "price": "service_price" (например: 1100)
-        }
-
-        В массиве services должна быть минимум одна услуга.
-
-        ---
-
-        # Логика работы
-
-        1. Собери данные у пациента пошагово
-        2. Повтори данные перед созданием записи
-        3. Только после подтверждения пациента вызывай функцию
-        4. Передай все данные строго в соответствии со схемой
-
-    """
-
-    
-        
-    phone_with_plus = f"+{phone}" 
-    payload = {
-        "name": name,
-        "phone": phone_with_plus,
-        "date": date,
-        "time": time,
-        "services": [{
-                      "id": service_id, 
-                      "name": service_name, 
-                      "price": service_price
-                      }
-        ],
-        "total": service_price,
-        "status": "new",
-        "cabinet_id":  cabinet_id,
-        "discount_percent":  discount_percent,
-        "cupon_name": cupon_name,
-      
-    }
-    response = supabase.table("bookings").insert(payload).execute()
-
-    print(f"Response: {response}")
-
-
-    if response.data:
-        return json.dumps(response.data, ensure_ascii=False)
-    
-    if response.error:
-        return json.dumps({"error": response.error.message + "Не удалось создать запись, попробуйте еще раз" }, ensure_ascii=False)
    
+   
+    url = "https://crmexchange.1denta.ru/api/v2/service"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjU1MjksImFwaUtleSI6InRuTUU1OHVNbXVZQjBUS01FN3JDIiwib3JnSWQiOjEwNDg0LCJuYW1lIjoi0KPQvNCw0YDQsdC10LrQvtCyINCa0LDQvdCw0YLQsdC10Log0KPQvNCw0YDQsdC10LrQvtCy0LjRhyIsInBob25lIjoiKzcoOTk5KTg1MS02Ni05MiIsImVtYWlsIjoiYWxpZmRlbnRtb3Njb3dAZ21haWwuY29tIiwiaWF0IjoxNzcxMjQ1MzA3fQ.ftZ3FNzSEiOuS6Ex9I_kcpCsGmL_Z7ElGAp5P62fMFs"
+    }
+    params = {
+        "page": 2,
+        "perPage": 460
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=params) as response:
+            if response.status == 200:
+                data = await response.json()
+                print(f"вот ответ", data)
+                return json.dumps(data, ensure_ascii=False)
+            
+               
+            else:
+                return json.dumps(
+                    {"error": f"HTTP {response.status}"},
+                    ensure_ascii=False
+                )
+
+
+
+
+
+@llm.function_tool
+async def get_doctors() -> str:
+    url = "https://crmexchange.1denta.ru/api/v2/resource"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjU1MjksImFwaUtleSI6InRuTUU1OHVNbXVZQjBUS01FN3JDIiwib3JnSWQiOjEwNDg0LCJuYW1lIjoi0KPQvNCw0YDQsdC10LrQvtCyINCa0LDQvdCw0YLQsdC10Log0KPQvNCw0YDQsdC10LrQvtCy0LjRhyIsInBob25lIjoiKzcoOTk5KTg1MS02Ni05MiIsImVtYWlsIjoiYWxpZmRlbnRtb3Njb3dAZ21haWwuY29tIiwiaWF0IjoxNzcxMjQ1MzA3fQ.ftZ3FNzSEiOuS6Ex9I_kcpCsGmL_Z7ElGAp5P62fMFs"
+    }
+    params = {
+        "page": 2,
+        "perPage": 460
+    }
     
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                print(f"вот ответ", data)
+                return json.dumps(data, ensure_ascii=False)
+            
+               
+            else:
+                return json.dumps(
+                    {"error": f"HTTP {response.status}"},
+                    ensure_ascii=False
+                )
+
+
+
+
+            
     
 
 
+    
+
+
+
+    
 
 
 
